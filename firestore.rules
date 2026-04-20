@@ -1,0 +1,71 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Default Deny - The foundation of security
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 0.3 Global Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // --- COLLECTION RULES ---
+
+    // 1. Users Collection - Stores basic profile info and synchronization state
+    match /users/{userId} {
+      function isValidUser(data) {
+        return data.keys().hasAll(['email']) &&
+               data.email is string && data.email.size() <= 256;
+      }
+
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      // Allow updates to profile and sync state. We include email in hasOnly just in case it's in the payload.
+      allow update: if isOwner(userId) && 
+                      isValidUser(request.resource.data) &&
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'picture', 'lastLogin', 'email']);
+    }
+
+    // 2. Trades Collection - Stores individual trade records
+    match /trades/{tradeId} {
+      function isValidTrade(data) {
+        // Pillar 1 & 2: Identitiy and Schema Validation
+        return data.userId == request.auth.uid &&
+               data.stock is string && data.stock.size() <= 256 &&
+               data.date is string && data.date.size() <= 128 &&
+               data.qty is number &&
+               data.price is number &&
+               data.createdAt is string &&
+               data.raw is map; // Ensure the raw data object is present
+      }
+
+      // Pillar 8: Secure List Queries
+      // The rule itself enforces the boundary, requiring the client to use a proper where clause.
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      // Pillar 2: Write Validation
+      allow create: if isSignedIn() && isValidTrade(request.resource.data);
+      
+      // Pillar 4 & Pillar 9: Prevent ownership transfer or key state manipulation after creation
+      allow update: if isSignedIn() && 
+                      resource.data.userId == request.auth.uid && 
+                      isValidTrade(request.resource.data) &&
+                      request.resource.data.userId == resource.data.userId &&
+                      request.resource.data.createdAt == resource.data.createdAt;
+      
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+  }
+}

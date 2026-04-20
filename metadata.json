@@ -1,0 +1,6 @@
+{
+  "name": "Option Trading Dashboard",
+  "description": "A dashboard to analyze option trading data from a CSV file, calculating P&L for closed trades and visualizing performance.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

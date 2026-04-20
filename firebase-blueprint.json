@@ -1,0 +1,47 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Information about the authenticated user.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "picture": { "type": "string" },
+        "lastLogin": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email"]
+    },
+    "TradeRecord": {
+      "title": "Trade Record",
+      "description": "An individual trade record from the uploaded CSV.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "date": { "type": "string" },
+        "account": { "type": "string" },
+        "stock": { "type": "string" },
+        "expiry": { "type": "string" },
+        "strike": { "type": "number" },
+        "type": { "type": "string", "enum": ["Call", "Put", "Stock"] },
+        "qty": { "type": "number" },
+        "price": { "type": "number" },
+        "commission": { "type": "number" },
+        "fees": { "type": "number" },
+        "netAmount": { "type": "number" },
+        "importBatchId": { "type": "string" }
+      },
+      "required": ["userId", "date", "stock", "qty", "price"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Stores user profile and metadata."
+    },
+    "/trades/{tradeId}": {
+      "schema": "TradeRecord",
+      "description": "Collection of all individual trade entries."
+    }
+  }
+}
