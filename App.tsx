@@ -8,7 +8,7 @@ import PnLOverTimeChart from './components/PnLOverTimeChart';
 import PnLBySymbolChart from './components/PnLBySymbolChart';
 import PnLByOptionTypeChart from './components/PnLByOptionTypeChart';
 import PnLByYearMonthChart from './components/PnLByYearMonthChart';
-import UnmatchedTradesTable from './components/OptionTypeDistributionChart';
+import UnmatchedTradesTable from './components/UnmatchedTradesTable';
 
 
 declare const Papa: any; // PapaParse is loaded via CDN
