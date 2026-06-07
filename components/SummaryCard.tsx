@@ -5,15 +5,28 @@ interface SummaryCardProps {
   title: string;
   value: string | number;
   description?: string;
-  valueColorClass?: string; // Tailwind class for text color, e.g., 'text-green-600'
+  valueColorClass?: string;
+  icon?: React.ReactNode;
+  trend?: 'up' | 'down' | 'neutral';
 }
 
-const SummaryCard: React.FC<SummaryCardProps> = ({ title, value, description, valueColorClass }) => {
+const SummaryCard: React.FC<SummaryCardProps> = ({ title, value, description, valueColorClass, icon, trend }) => {
   return (
-    <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-      <h3 className="text-sm font-medium text-gray-500">{title}</h3>
-      <p className={`mt-1 text-2xl font-bold ${valueColorClass || 'text-gray-900'}`}>{value}</p>
-      {description && <p className="mt-2 text-xs text-gray-500">{description}</p>}
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col gap-3 hover:shadow-md transition-shadow duration-200">
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{title}</p>
+        {icon && (
+          <div className="w-8 h-8 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 border border-slate-100">
+            {icon}
+          </div>
+        )}
+      </div>
+      <div>
+        <p className={`text-2xl font-black tracking-tight ${valueColorClass || 'text-slate-900'}`}>{value}</p>
+        {description && (
+          <p className="mt-1 text-[10px] text-slate-400 font-medium leading-tight">{description}</p>
+        )}
+      </div>
     </div>
   );
 };

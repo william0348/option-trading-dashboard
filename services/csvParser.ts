@@ -126,16 +126,19 @@ export function parseTrades(data: RawTrade[]): ParsedTrade[] {
     const originalDate = robustParseDate(rawTrade.Date);
     if (!originalDate) continue;
 
+    const account = (rawTrade.Account || (rawTrade as any).account || 'Default').trim();
+
     parsedTrades.push({
       id: `trade-${idCounter++}`,
       ...symbolDetails,
+      uniqueKey: `${account}::${symbolDetails.uniqueKey}`,
       originalDate,
       action,
       quantity: parseNumericValue(rawTrade.Quantity),
       tradePrice: parseNumericValue(rawTrade.Price),
       fees: parseNumericValue(rawTrade['Fees & Comm']),
       amount: parseNumericValue(rawTrade.Amount),
-      account: (rawTrade.Account || (rawTrade as any).account || 'Default').trim(),
+      account,
     });
   }
   return parsedTrades;
@@ -267,7 +270,11 @@ export function processClosedTrades(tradesToProcess: ParsedTrade[]): { closedTra
   processExpiredPositions(openLongs, referenceDate, 'long', closedTrades);
 
   const openPositions: ParsedTrade[] = [
-    ...Object.values(openShorts).flat().map(tracker => ({ ...tracker.trade, quantity: tracker.remainingQuantity })),
+    // Exclude stock short positions — these are sells without a matching buy in the CSV,
+    // typically meaning the shares were purchased before the CSV export period.
+    ...Object.values(openShorts).flat()
+      .filter(tracker => tracker.trade.assetType === AssetType.OPTION)
+      .map(tracker => ({ ...tracker.trade, quantity: tracker.remainingQuantity })),
     ...Object.values(openLongs).flat().map(tracker => ({ ...tracker.trade, quantity: tracker.remainingQuantity })),
   ].filter(t => t.quantity > 0);
 

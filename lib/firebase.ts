@@ -51,25 +51,28 @@ export const syncUserProfile = async (user: User) => {
 };
 
 export const saveTradesToFirestore = async (userId: string, trades: any[]) => {
+  // New writes go to users/{userId}/trades subcollection
+  const userTradesCol = collection(db, 'users', userId, 'trades');
   const batch = [];
-  // To avoid duplicate imports, we could use a batch ID or hash, 
-  // but for now let's just add them.
   for (const trade of trades) {
-    batch.push(addDoc(collection(db, 'trades'), {
-      userId,
-      ...trade,
-      importedAt: new Date().toISOString()
+    batch.push(addDoc(userTradesCol, {
+      raw: trade,
+      createdAt: new Date().toISOString()
     }));
   }
   await Promise.all(batch);
 };
 
 export const loadTradesFromFirestore = async (userId: string) => {
+  // Try new subcollection first
+  const subCol = collection(db, 'users', userId, 'trades');
+  const subSnap = await getDocs(subCol);
+  if (!subSnap.empty) {
+    return subSnap.docs.map(doc => doc.data().raw);
+  }
+
+  // Fallback: old flat trades collection (queried by userId)
   const q = query(collection(db, 'trades'), where('userId', '==', userId));
-  const querySnapshot = await getDocs(q);
-  const trades: any[] = [];
-  querySnapshot.forEach((doc) => {
-    trades.push(doc.data());
-  });
-  return trades;
+  const flatSnap = await getDocs(q);
+  return flatSnap.docs.map(doc => doc.data().raw);
 };

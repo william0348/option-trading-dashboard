@@ -11,15 +11,23 @@ interface FileUploadProps {
   setError: (error: string | null) => void;
   existingAccounts: string[];
   lastImportDate: string | null;
+  importProgress: number;
+  importStep: string;
+  setImportProgress: (v: number) => void;
+  setImportStep: (v: string) => void;
 }
 
-const FileUpload: React.FC<FileUploadProps> = ({ 
-  onDataParsed, 
-  setIsLoading, 
-  isLoading, 
-  setError, 
-  existingAccounts = [], 
-  lastImportDate = null 
+const FileUpload: React.FC<FileUploadProps> = ({
+  onDataParsed,
+  setIsLoading,
+  isLoading,
+  setError,
+  existingAccounts = [],
+  lastImportDate = null,
+  importProgress,
+  importStep,
+  setImportProgress,
+  setImportStep,
 }) => {
   const [accountName, setAccountName] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -60,6 +68,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
 
     setIsLoading(true);
     setError(null);
+    setImportProgress(10);
+    setImportStep('解析 CSV...');
 
     Papa.parse(selectedFile, {
       header: true,
@@ -78,6 +88,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
           Account: accountName.trim()
         }));
 
+        setImportProgress(25);
+        setImportStep('上傳資料...');
         onDataParsed(dataWithAccount);
         setIsLoading(false);
         // Reset after successful parse
@@ -91,6 +103,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
         console.error("PapaParse error:", err);
         setError(`Failed to read file: ${err.message}`);
         setIsLoading(false);
+        setImportProgress(0);
+        setImportStep('');
       }
     });
   };
@@ -178,9 +192,9 @@ const FileUpload: React.FC<FileUploadProps> = ({
           </label>
         </div>
 
-        <button 
-          onClick={handleParse} 
-          disabled={isLoading || !selectedFile || !accountName.trim()}
+        <button
+          onClick={handleParse}
+          disabled={isLoading || importProgress > 0 || !selectedFile || !accountName.trim()}
           className="w-full py-3 bg-slate-900 text-white font-black rounded-xl shadow-lg hover:bg-slate-800 disabled:bg-slate-100 disabled:text-slate-300 transition-all active:scale-95 uppercase tracking-widest text-[10px] flex items-center justify-center"
         >
           {isLoading ? (
@@ -190,6 +204,22 @@ const FileUpload: React.FC<FileUploadProps> = ({
             </div>
           ) : 'Execute Import Sequence'}
         </button>
+
+        {importProgress > 0 && (
+          <div className="mt-3 space-y-1.5">
+            <div className="flex justify-between items-center">
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{importStep}</span>
+              <span className={`text-[9px] font-black uppercase tracking-widest ${importProgress === 100 ? 'text-emerald-500' : 'text-indigo-500'}`}>{importProgress}%</span>
+            </div>
+            <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ease-out ${importProgress === 100 ? 'bg-emerald-500' : 'bg-indigo-500'}`}
+                style={{ width: `${importProgress}%` }}
+              />
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );

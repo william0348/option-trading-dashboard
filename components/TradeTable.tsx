@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { ClosedTrade, OptionType } from '../types';
+import { ClosedTrade, OptionType, AssetType, TradeAction } from '../types';
 
 interface TradeTableProps {
   trades: ClosedTrade[];
@@ -74,11 +74,22 @@ const TradeTable: React.FC<TradeTableProps> = ({ trades }) => {
     }).format(amount);
   };
 
-  const formatOptionType = (type: OptionType) => {
-    return type === OptionType.CALL ? 'Call' : 'Put';
+  const formatTradeType = (trade: ClosedTrade) => {
+    if (trade.assetType === AssetType.STOCK) {
+      const isLong = trade.buyTradeOriginal.action === TradeAction.BUY || trade.buyTradeOriginal.action === TradeAction.BUY_TO_OPEN;
+      return isLong ? 'Buy' : 'Sell';
+    }
+    if (!trade.optionType) return '—';
+    return trade.optionType === OptionType.CALL ? 'Call' : 'Put';
   };
 
-  const formatDate = (date: Date) => {
+  const formatStrike = (amount: number | undefined) => {
+    if (amount === undefined || amount === null || isNaN(amount)) return '—';
+    return formatCurrency(amount);
+  };
+
+  const formatDate = (date: Date | undefined) => {
+    if (!date || !(date instanceof Date) || isNaN(date.getTime())) return 'N/A';
     return date.toLocaleDateString();
   };
 
@@ -176,8 +187,8 @@ const TradeTable: React.FC<TradeTableProps> = ({ trades }) => {
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatDate(trade.closeDate)}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{trade.stockName}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatDate(trade.optionDate)}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatCurrency(trade.strikePrice)}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatOptionType(trade.optionType)}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatStrike(trade.strikePrice)}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatTradeType(trade)}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{trade.matchedQuantity}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatDate(trade.sellTradeOriginal.originalDate)}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatCurrency(trade.sellTradeOriginal.tradePrice)}</td>
