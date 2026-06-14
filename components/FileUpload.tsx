@@ -1,6 +1,9 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { RawTrade } from '../types';
+import {
+  detectBroker, getBrokerConfig, normalizeRow, BROKER_DISPLAY_NAMES, BrokerName,
+} from '../services/brokerAdapters';
 
 declare const Papa: any;
 
@@ -32,6 +35,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
   const [accountName, setAccountName] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [showAccountOptions, setShowAccountOptions] = useState(false);
+  const [detectedBroker, setDetectedBroker] = useState<BrokerName | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const filteredAccountOptions = useMemo(() => 
@@ -53,6 +57,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
     const file = event.target.files?.[0];
     if (file) {
       setSelectedFile(file);
+      setDetectedBroker(null);
     }
   };
 
@@ -74,23 +79,29 @@ const FileUpload: React.FC<FileUploadProps> = ({
     Papa.parse(selectedFile, {
       header: true,
       skipEmptyLines: true,
-      complete: (results: { data: Omit<RawTrade, 'Account'>[]; errors: any[]; meta: any }) => {
+      complete: (results: { data: Record<string, string>[]; errors: any[]; meta: { fields?: string[] } }) => {
         if (results.errors.length) {
           console.error("CSV parsing errors:", results.errors);
           setError(`Error parsing CSV: ${results.errors[0].message}`);
           setIsLoading(false);
           return;
         }
-        
-        // Add the account name to each parsed row
-        const dataWithAccount = results.data.map(row => ({
-          ...row,
-          Account: accountName.trim()
-        }));
+
+        // Detect broker format and normalize columns to standard RawTrade shape
+        const broker = detectBroker(results.meta.fields ?? []);
+        const config = getBrokerConfig(broker);
+        setDetectedBroker(broker);
+
+        const normalized = results.data.map(row => {
+          const r = normalizeRow(row, config);
+          // Override Account with user-supplied name
+          r.Account = accountName.trim();
+          return r;
+        });
 
         setImportProgress(25);
         setImportStep('上傳資料...');
-        onDataParsed(dataWithAccount);
+        onDataParsed(normalized);
         setIsLoading(false);
         // Reset after successful parse
         setAccountName('');
@@ -191,6 +202,27 @@ const FileUpload: React.FC<FileUploadProps> = ({
             <input id="csv-upload" type="file" className="hidden" accept=".csv" onChange={handleFileChange} />
           </label>
         </div>
+
+        {detectedBroker && (
+          <div className={`flex items-center gap-2 px-3 py-2 rounded-xl text-[10px] font-bold ${
+            detectedBroker === 'unknown'
+              ? 'bg-amber-50 border border-amber-100 text-amber-600'
+              : 'bg-indigo-50 border border-indigo-100 text-indigo-600'
+          }`}>
+            {detectedBroker === 'unknown' ? (
+              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            ) : (
+              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            )}
+            <span className="uppercase tracking-widest text-[9px] font-black">
+              {detectedBroker === 'unknown' ? 'Unknown Format — may not parse correctly' : BROKER_DISPLAY_NAMES[detectedBroker]}
+            </span>
+          </div>
+        )}
 
         <button
           onClick={handleParse}

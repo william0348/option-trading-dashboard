@@ -9,6 +9,7 @@ import PnLBySymbolChart from './components/PnLBySymbolChart';
 import PnLByOptionTypeChart from './components/PnLByOptionTypeChart';
 import PnLByYearMonthChart from './components/PnLByYearMonthChart';
 import UnmatchedTradesTable from './components/UnmatchedTradesTable';
+import PnLCalendarChart from './components/PnLCalendarChart';
 import {
   auth, signInWithGoogle, logout, onAuthStateChanged, syncUserProfile,
   saveTradesToFirestore, loadTradesFromFirestore,
@@ -68,6 +69,11 @@ function App() {
   const [selectedDatePreset, setSelectedDatePreset] = useState<'custom' | 'current_month' | 'current_year'>('current_year');
   const [globalSearchTerm, setGlobalSearchTerm] = useState<string>('');
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [calendarDisplayMonth, setCalendarDisplayMonth] = useState<string>(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
 
   // Extract unique account names from all Firestore trades
   const existingAccounts = useMemo(() => {
@@ -312,8 +318,17 @@ function App() {
       });
     }
 
+    // Apply Day filter (from calendar click)
+    if (selectedDay) {
+      currentTrades = currentTrades.filter(trade => {
+        const d = trade.closeDate;
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        return key === selectedDay;
+      });
+    }
+
     return currentTrades;
-  }, [closedTrades, globalSearchTerm, filterStock, filterAssetType, filterOptionType, filterStartDate, filterEndDate]);
+  }, [closedTrades, globalSearchTerm, filterStock, filterAssetType, filterOptionType, filterStartDate, filterEndDate, selectedDay]);
 
   // Recalculate summary based on filtered trades
   const filteredSummary = useMemo(() => {
@@ -351,6 +366,16 @@ function App() {
     return pnl >= 0 ? 'text-green-600' : 'text-red-600';
   };
 
+  const handleDayClick = (day: string | null) => {
+    setSelectedDay(day);
+    if (day) setCalendarDisplayMonth(day.slice(0, 7));
+  };
+
+  const handleMonthClick = (ym: string | null) => {
+    setSelectedMonth(ym);
+    setSelectedDay(null);
+  };
+
   const clearFilters = () => {
     setGlobalSearchTerm('');
     setFilterStock('');
@@ -358,7 +383,9 @@ function App() {
     setFilterOptionType('ALL');
     setFilterStartDate('');
     setFilterEndDate('');
-    setSelectedDatePreset('custom'); // Reset date preset
+    setSelectedDatePreset('custom');
+    setSelectedDay(null);
+    setSelectedMonth(null);
   };
 
   const handleExportCsv = () => {
@@ -630,7 +657,7 @@ function App() {
                 <p className="text-xl font-black mb-4 text-slate-300">
                   {selectedMonth ? <span className="text-indigo-500">{selectedMonth}</span> : 'All Months'}
                 </p>
-                <PnLByYearMonthChart trades={filteredTrades} baseFund={currentBaseFund || undefined} onMonthClick={setSelectedMonth} selectedMonth={selectedMonth}/>
+                <PnLByYearMonthChart trades={filteredTrades} baseFund={currentBaseFund || undefined} onMonthClick={handleMonthClick} selectedMonth={selectedMonth}/>
               </div>
               <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
                 <div className="flex items-center justify-between mb-1">
@@ -650,13 +677,32 @@ function App() {
               </div>
             </div>
 
+            {/* P&L Calendar */}
+            <PnLCalendarChart
+              trades={closedTrades}
+              selectedDay={selectedDay}
+              onDayClick={handleDayClick}
+              displayMonth={calendarDisplayMonth}
+              onDisplayMonthChange={setCalendarDisplayMonth}
+            />
+
             {/* Trade Table */}
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
               <div className="px-6 py-4 border-b border-slate-50 flex items-center justify-between">
                 <div>
                   <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Trade History</h3>
-                  <p className="text-sm font-black text-slate-900 mt-0.5">{filteredTrades.length} records</p>
+                  <p className="text-sm font-black text-slate-900 mt-0.5">
+                    {selectedDay
+                      ? <><span className="text-indigo-500">{selectedDay}</span> — {filteredTrades.length} trades</>
+                      : `${filteredTrades.length} records`}
+                  </p>
                 </div>
+                {selectedDay && (
+                  <button onClick={() => setSelectedDay(null)}
+                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-[9px] font-black uppercase tracking-widest transition-colors">
+                    Clear Day
+                  </button>
+                )}
               </div>
               <TradeTable trades={filteredTrades}/>
             </div>
