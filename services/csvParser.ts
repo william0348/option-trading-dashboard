@@ -291,10 +291,10 @@ function createClosedTrade(sellTrade: ParsedTrade, buyTrade: ParsedTrade, matche
   const openDate = openingTrade.originalDate;
   const closeDate = closingTrade.originalDate;
 
-  const pnlPerUnitSell = sellTrade.amount / sellTrade.quantity;
-  const pnlPerUnitBuy = buyTrade.amount / buyTrade.quantity;
+  const pnlPerUnitSell = sellTrade.quantity !== 0 ? sellTrade.amount / sellTrade.quantity : 0;
+  const pnlPerUnitBuy = buyTrade.quantity !== 0 ? buyTrade.amount / buyTrade.quantity : 0;
   const pnl = (pnlPerUnitSell + pnlPerUnitBuy) * matchedQuantity;
-  
+
   const timeDiff = closeDate.getTime() - openDate.getTime();
   let remainDays = Math.ceil(timeDiff / (1000 * 60 * 60 * 24));
   if (remainDays <= 0) remainDays = 1;
@@ -324,7 +324,7 @@ function createClosedTrade(sellTrade: ParsedTrade, buyTrade: ParsedTrade, matche
     netFees: (sellTrade.fees / sellTrade.quantity + buyTrade.fees / buyTrade.quantity) * matchedQuantity,
     returnPercentage: returnOnInvestment,
     remainDays,
-    annualizedReturnPercentage: returnOnInvestment * (365 / remainDays),
+    annualizedReturnPercentage: Math.max(-9999, Math.min(9999, returnOnInvestment * (365 / remainDays))),
     stockName: buyTrade.stockName,
     assetType: buyTrade.assetType,
     optionDate: buyTrade.optionDate,

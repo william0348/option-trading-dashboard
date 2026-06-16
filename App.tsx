@@ -253,8 +253,7 @@ function App() {
     let currentTrades = closedTrades;
 
     const lowerCaseGlobalSearch = globalSearchTerm.toLowerCase();
-    const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2, });
-    const percentFormatter = new Intl.NumberFormat('en-US', { style: 'percent', minimumFractionDigits: 2 });
+    const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 
     // Apply Global Search Filter first

@@ -10,7 +10,7 @@ interface SummaryCardProps {
   trend?: 'up' | 'down' | 'neutral';
 }
 
-const SummaryCard: React.FC<SummaryCardProps> = ({ title, value, description, valueColorClass, icon, trend }) => {
+const SummaryCard: React.FC<SummaryCardProps> = ({ title, value, description, valueColorClass, icon }) => {
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col gap-3 hover:shadow-md transition-shadow duration-200">
       <div className="flex items-center justify-between">
@@ -31,4 +31,4 @@ const SummaryCard: React.FC<SummaryCardProps> = ({ title, value, description, va
   );
 };
 
-export default SummaryCard;
+export default React.memo(SummaryCard);

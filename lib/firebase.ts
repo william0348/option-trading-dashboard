@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User, setPersistence, browserLocalPersistence } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, addDoc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, collection, query, where, getDocs, writeBatch } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
@@ -50,17 +50,41 @@ export const syncUserProfile = async (user: User) => {
   }, { merge: true });
 };
 
-export const saveTradesToFirestore = async (userId: string, trades: any[]) => {
-  // New writes go to users/{userId}/trades subcollection
-  const userTradesCol = collection(db, 'users', userId, 'trades');
-  const batch = [];
-  for (const trade of trades) {
-    batch.push(addDoc(userTradesCol, {
-      raw: trade,
-      createdAt: new Date().toISOString()
-    }));
+// Deterministic hash of key trade fields — used as Firestore doc ID to prevent duplicate imports.
+function tradeDocId(trade: any): string {
+  const key = [
+    trade.Date ?? '',
+    trade.Action ?? '',
+    trade.Symbol ?? '',
+    trade.Quantity ?? '',
+    trade.Amount ?? '',
+    trade.Account ?? '',
+  ].join('|');
+  let h = 5381;
+  for (let i = 0; i < key.length; i++) {
+    h = ((h << 5) + h) ^ key.charCodeAt(i);
+    h = h | 0;
   }
-  await Promise.all(batch);
+  return (h >>> 0).toString(36);
+}
+
+const FIRESTORE_BATCH_LIMIT = 499;
+
+export const saveTradesToFirestore = async (userId: string, trades: any[]) => {
+  const userTradesCol = collection(db, 'users', userId, 'trades');
+  const createdAt = new Date().toISOString();
+
+  // Process in batches of 499 (Firestore limit is 500 ops/batch)
+  for (let i = 0; i < trades.length; i += FIRESTORE_BATCH_LIMIT) {
+    const chunk = trades.slice(i, i + FIRESTORE_BATCH_LIMIT);
+    const batch = writeBatch(db);
+    for (const trade of chunk) {
+      // setDoc with deterministic ID = idempotent: re-uploading same CSV is a no-op
+      const docRef = doc(userTradesCol, tradeDocId(trade));
+      batch.set(docRef, { raw: trade, createdAt });
+    }
+    await batch.commit();
+  }
 };
 
 export const loadTradesFromFirestore = async (userId: string) => {
@@ -68,11 +92,11 @@ export const loadTradesFromFirestore = async (userId: string) => {
   const subCol = collection(db, 'users', userId, 'trades');
   const subSnap = await getDocs(subCol);
   if (!subSnap.empty) {
-    return subSnap.docs.map(doc => doc.data().raw);
+    return subSnap.docs.map(d => d.data().raw);
   }
 
   // Fallback: old flat trades collection (queried by userId)
   const q = query(collection(db, 'trades'), where('userId', '==', userId));
   const flatSnap = await getDocs(q);
-  return flatSnap.docs.map(doc => doc.data().raw);
+  return flatSnap.docs.map(d => d.data().raw);
 };
