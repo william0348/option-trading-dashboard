@@ -84,7 +84,6 @@ function App() {
       })
       .filter((a): a is string => !!a && a.trim() !== '');
     const unique = [...new Set(accounts)].sort();
-    console.log('[App] existingAccounts:', unique);
     return unique;
   }, [allFirestoreTrades]);
 
@@ -93,7 +92,6 @@ function App() {
     setFirestoreLoading(true);
     try {
       const trades = await loadTradesFromFirestore(uid);
-      console.log('[Firestore] raw docs sample:', trades.slice(0, 2));
 
       const rawTrades = trades.map(({ userId, importedAt, ...rest }: any) => {
         // Normalise account field — could be 'Account' or 'account' depending on which version saved it
@@ -101,7 +99,6 @@ function App() {
         return { ...rest, Account: account } as RawTrade;
       });
 
-      console.log('[Firestore] rawTrades sample:', rawTrades.slice(0, 2));
       setAllFirestoreTrades(rawTrades);
 
       // Find most recent importedAt
@@ -160,7 +157,6 @@ function App() {
           const account = (t.Account || (t as any).account || '').trim();
           return account === selectedAccount;
         });
-    console.log('[App] selectedAccount:', selectedAccount, 'filtered count:', filtered.length);
     setRawCsvData(filtered.length > 0 ? filtered : null);
   }, [allFirestoreTrades, selectedAccount]);
 
@@ -194,7 +190,6 @@ function App() {
   useEffect(() => {
     if (rawCsvData) {
       const pTrades = parseTrades(rawCsvData);
-      console.log('[App] rawCsvData count:', rawCsvData.length, '→ parsedTrades:', pTrades.length, '| sample raw:', rawCsvData[0]);
       setParsedTrades(pTrades);
     } else {
       setParsedTrades([]);
@@ -205,7 +200,6 @@ function App() {
     if (parsedTrades.length > 0) {
       // FIX: Correctly destructure 'unmatchedCloses' from 'processClosedTrades' return value instead of non-existent 'unmatchedBuys'.
       const { closedTrades: cTrades, openPositions: oPositions, unmatchedCloses: uCloses } = processClosedTrades(parsedTrades);
-      console.log('[App] processClosedTrades → closed:', cTrades.length, 'open:', oPositions.length, 'unmatched:', uCloses.length);
       setClosedTrades(cTrades);
       // FIX: Use the correctly destructured 'uCloses' to set the unmatched trades.
       setUnmatchedTrades([...oPositions, ...uCloses].sort((a, b) => a.originalDate.getTime() - b.originalDate.getTime()));
