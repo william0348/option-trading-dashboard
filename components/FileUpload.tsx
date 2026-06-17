@@ -1,11 +1,10 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import Papa from 'papaparse';
 import { RawTrade } from '../types';
 import {
   detectBroker, getBrokerConfig, normalizeRow, BROKER_DISPLAY_NAMES, BrokerName,
 } from '../services/brokerAdapters';
-
-declare const Papa: any;
 
 interface FileUploadProps {
   onDataParsed: (data: RawTrade[]) => void;

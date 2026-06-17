@@ -50,7 +50,8 @@ export const syncUserProfile = async (user: User) => {
   }, { merge: true });
 };
 
-// Deterministic hash of key trade fields — used as Firestore doc ID to prevent duplicate imports.
+// Deterministic ID from key trade fields — used as Firestore doc ID to prevent duplicate imports.
+// Uses FNV-1a 64-bit (as two 32-bit halves) to avoid birthday-bound collisions at ~10k trades.
 function tradeDocId(trade: any): string {
   const key = [
     trade.Date ?? '',
@@ -60,12 +61,13 @@ function tradeDocId(trade: any): string {
     trade.Amount ?? '',
     trade.Account ?? '',
   ].join('|');
-  let h = 5381;
+  let h1 = 0x811c9dc5, h2 = 0xcbf29ce4;
   for (let i = 0; i < key.length; i++) {
-    h = ((h << 5) + h) ^ key.charCodeAt(i);
-    h = h | 0;
+    const c = key.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 0x01000193);
+    h2 = Math.imul(h2 ^ c, 0x01000193) ^ (h1 >>> 16);
   }
-  return (h >>> 0).toString(36);
+  return (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36);
 }
 
 const FIRESTORE_BATCH_LIMIT = 499;

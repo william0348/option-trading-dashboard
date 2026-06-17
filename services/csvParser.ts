@@ -1,7 +1,6 @@
 
 import { ParsedTrade, RawTrade, OptionType, TradeAction, ParsedSymbol, ClosedTrade, SummaryData, OpenPositionTracker, AssetType } from '../types';
 
-declare const Papa: any; // PapaParse is loaded via CDN
 
 /**
  * Parses a numeric string from CSV, handling currency symbols, commas, and parentheses for negatives.
@@ -291,8 +290,10 @@ function createClosedTrade(sellTrade: ParsedTrade, buyTrade: ParsedTrade, matche
   const openDate = openingTrade.originalDate;
   const closeDate = closingTrade.originalDate;
 
-  const pnlPerUnitSell = sellTrade.quantity !== 0 ? sellTrade.amount / sellTrade.quantity : 0;
-  const pnlPerUnitBuy = buyTrade.quantity !== 0 ? buyTrade.amount / buyTrade.quantity : 0;
+  const sellQty = sellTrade.quantity || 1;
+  const buyQty = buyTrade.quantity || 1;
+  const pnlPerUnitSell = sellTrade.amount / sellQty;
+  const pnlPerUnitBuy = buyTrade.amount / buyQty;
   const pnl = (pnlPerUnitSell + pnlPerUnitBuy) * matchedQuantity;
 
   const timeDiff = closeDate.getTime() - openDate.getTime();
@@ -302,7 +303,7 @@ function createClosedTrade(sellTrade: ParsedTrade, buyTrade: ParsedTrade, matche
   let returnOnInvestment = 0;
   if (isOption) {
     if (isLongPosition) {
-      const investment = Math.abs((buyTrade.amount / buyTrade.quantity) * matchedQuantity);
+      const investment = Math.abs((buyTrade.amount / buyQty) * matchedQuantity);
       returnOnInvestment = investment !== 0 ? (pnl / investment) * 100 : 0;
     } else {
       // Short option (collateral based)
@@ -311,7 +312,8 @@ function createClosedTrade(sellTrade: ParsedTrade, buyTrade: ParsedTrade, matche
     }
   } else {
     // Stock (investment based)
-    const investment = Math.abs((openingTrade.amount / openingTrade.quantity) * matchedQuantity);
+    const openQty = openingTrade.quantity || 1;
+    const investment = Math.abs((openingTrade.amount / openQty) * matchedQuantity);
     returnOnInvestment = investment !== 0 ? (pnl / investment) * 100 : 0;
   }
 
@@ -321,7 +323,7 @@ function createClosedTrade(sellTrade: ParsedTrade, buyTrade: ParsedTrade, matche
     buyTradeOriginal: buyTrade,
     matchedQuantity,
     pnl,
-    netFees: (sellTrade.fees / sellTrade.quantity + buyTrade.fees / buyTrade.quantity) * matchedQuantity,
+    netFees: (sellTrade.fees / sellQty + buyTrade.fees / buyQty) * matchedQuantity,
     returnPercentage: returnOnInvestment,
     remainDays,
     annualizedReturnPercentage: Math.max(-9999, Math.min(9999, returnOnInvestment * (365 / remainDays))),

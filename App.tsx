@@ -10,6 +10,7 @@ import PnLByOptionTypeChart from './components/PnLByOptionTypeChart';
 import PnLByYearMonthChart from './components/PnLByYearMonthChart';
 import UnmatchedTradesTable from './components/UnmatchedTradesTable';
 import PnLCalendarChart from './components/PnLCalendarChart';
+import ErrorBoundary from './components/ErrorBoundary';
 import {
   auth, signInWithGoogle, logout, onAuthStateChanged, syncUserProfile,
   saveTradesToFirestore, loadTradesFromFirestore,
@@ -476,6 +477,7 @@ function App() {
         </div>
       </header>
 
+      <ErrorBoundary>
       <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 py-6 space-y-5">
         {/* Import */}
         <FileUpload
@@ -741,6 +743,7 @@ function App() {
           </div>
         )}
       </main>
+      </ErrorBoundary>
     </div>
   );
 }
