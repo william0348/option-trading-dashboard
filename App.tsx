@@ -67,7 +67,7 @@ function App() {
   const [filterAssetType, setFilterAssetType] = useState<AssetType | 'ALL'>('ALL');
   const [filterStartDate, setFilterStartDate] = useState<string>('');
   const [filterEndDate, setFilterEndDate] = useState<string>('');
-  const [selectedDatePreset, setSelectedDatePreset] = useState<'custom' | 'current_month' | 'current_year'>('current_year');
+  const [selectedDatePreset, setSelectedDatePreset] = useState<'custom' | 'current_month' | 'last_month' | 'current_quarter' | 'last_quarter' | 'current_year' | 'last_year'>('current_year');
   const [globalSearchTerm, setGlobalSearchTerm] = useState<string>('');
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
@@ -224,15 +224,30 @@ function App() {
       const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
       newStartDate = formatDateToYYYYMMDD(startOfMonth);
       newEndDate = formatDateToYYYYMMDD(endOfMonth);
+    } else if (selectedDatePreset === 'last_month') {
+      const startOfLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      const endOfLastMonth = new Date(today.getFullYear(), today.getMonth(), 0);
+      newStartDate = formatDateToYYYYMMDD(startOfLastMonth);
+      newEndDate = formatDateToYYYYMMDD(endOfLastMonth);
+    } else if (selectedDatePreset === 'current_quarter') {
+      const qStart = Math.floor(today.getMonth() / 3) * 3;
+      newStartDate = formatDateToYYYYMMDD(new Date(today.getFullYear(), qStart, 1));
+      newEndDate = formatDateToYYYYMMDD(new Date(today.getFullYear(), qStart + 3, 0));
+    } else if (selectedDatePreset === 'last_quarter') {
+      const qStart = Math.floor(today.getMonth() / 3) * 3 - 3;
+      const y = qStart < 0 ? today.getFullYear() - 1 : today.getFullYear();
+      const q = ((qStart % 12) + 12) % 12;
+      newStartDate = formatDateToYYYYMMDD(new Date(y, q, 1));
+      newEndDate = formatDateToYYYYMMDD(new Date(y, q + 3, 0));
     } else if (selectedDatePreset === 'current_year') {
       const startOfYear = new Date(today.getFullYear(), 0, 1);
       const endOfYear = new Date(today.getFullYear(), 11, 31);
       newStartDate = formatDateToYYYYMMDD(startOfYear);
       newEndDate = formatDateToYYYYMMDD(endOfYear);
-    } 
-    // If 'custom' is selected, we don't change filterStartDate/EndDate here
-    // as the user will manually set them, or they retain their last values.
-    // The clearFilters function handles explicit clearing.
+    } else if (selectedDatePreset === 'last_year') {
+      newStartDate = formatDateToYYYYMMDD(new Date(today.getFullYear() - 1, 0, 1));
+      newEndDate = formatDateToYYYYMMDD(new Date(today.getFullYear() - 1, 11, 31));
+    }
 
     if (selectedDatePreset === 'custom') {
       setFilterStartDate('');
@@ -585,7 +600,11 @@ function App() {
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[11px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400">
                   <option value="custom">All Time</option>
                   <option value="current_month">This Month</option>
+                  <option value="last_month">Last Month</option>
+                  <option value="current_quarter">This Quarter</option>
+                  <option value="last_quarter">Last Quarter</option>
                   <option value="current_year">This Year</option>
+                  <option value="last_year">Last Year</option>
                 </select>
               </div>
               {selectedDatePreset === 'custom' && (
