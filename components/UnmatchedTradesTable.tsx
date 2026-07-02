@@ -15,9 +15,10 @@ const formatToMMDDYYYY = (date: Date | undefined | null) => {
   if (!date) return 'N/A';
   const d = date instanceof Date ? date : new Date(date);
   if (isNaN(d.getTime())) return 'Invalid';
-  const m = (d.getMonth() + 1).toString().padStart(2, '0');
-  const dNum = d.getDate().toString().padStart(2, '0');
-  const y = d.getFullYear();
+  // Dates are UTC midnight — use UTC accessors to avoid off-by-one in negative timezones
+  const m = (d.getUTCMonth() + 1).toString().padStart(2, '0');
+  const dNum = d.getUTCDate().toString().padStart(2, '0');
+  const y = d.getUTCFullYear();
   return `${m}/${dNum}/${y}`;
 };
 
@@ -66,6 +67,14 @@ const UnmatchedTradesTable: React.FC<UnmatchedTradesTableProps> = ({ trades }) =
   const formatCurrency = (amount: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
   const formatOptionType = (type: OptionType) => (type === OptionType.CALL ? 'Call' : 'Put');
 
+  // Days to expiry from today (UTC). Negative = already expired.
+  const getDte = (expiry: Date | undefined): number | null => {
+    if (!expiry) return null;
+    const now = new Date();
+    const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    return Math.round((expiry.getTime() - todayUtc) / (1000 * 60 * 60 * 24));
+  };
+
   return (
     <div className="overflow-x-auto">
       {trades.length === 0 ? (
@@ -96,7 +105,24 @@ const UnmatchedTradesTable: React.FC<UnmatchedTradesTableProps> = ({ trades }) =
                 <td className="px-3 py-1.5 whitespace-nowrap text-slate-400">{trade.action}</td>
                 <td className="px-3 py-1.5 whitespace-nowrap text-slate-900 font-black">{trade.stockName}</td>
                 <td className="px-3 py-1.5 whitespace-nowrap text-slate-500 italic text-[9px] uppercase font-black">{trade.assetType}</td>
-                <td className="px-3 py-1.5 whitespace-nowrap text-slate-400">{trade.assetType === AssetType.OPTION && trade.optionDate ? formatToMMDDYYYY(trade.optionDate) : '-'}</td>
+                <td className="px-3 py-1.5 whitespace-nowrap text-slate-400">
+                  {trade.assetType === AssetType.OPTION && trade.optionDate ? (
+                    <span className="flex items-center gap-1.5">
+                      {formatToMMDDYYYY(trade.optionDate)}
+                      {(() => {
+                        const dte = getDte(trade.optionDate);
+                        if (dte === null || dte > 5) return null;
+                        return (
+                          <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black ${
+                            dte < 0 ? 'bg-slate-100 text-slate-500' : dte <= 2 ? 'bg-rose-100 text-rose-600' : 'bg-amber-100 text-amber-600'
+                          }`}>
+                            {dte < 0 ? 'Expired' : dte === 0 ? 'Today!' : `${dte}d left`}
+                          </span>
+                        );
+                      })()}
+                    </span>
+                  ) : '-'}
+                </td>
                 <td className="px-3 py-1.5 whitespace-nowrap text-slate-400">{trade.assetType === AssetType.OPTION && trade.strikePrice ? formatCurrency(trade.strikePrice) : '-'}</td>
                 <td className="px-3 py-1.5 whitespace-nowrap text-slate-400">{trade.assetType === AssetType.OPTION && trade.optionType ? formatOptionType(trade.optionType) : '-'}</td>
                 <td className="px-3 py-1.5 whitespace-nowrap text-slate-600">{trade.quantity}</td>

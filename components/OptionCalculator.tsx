@@ -20,6 +20,7 @@ const OptionCalculator: React.FC = () => {
 
     const start = new Date(startDate);
     const end = new Date(expiryDate);
+    if (end.getTime() < start.getTime()) return null; // expiry before start — invalid
     const timeDiff = end.getTime() - start.getTime();
     let days = Math.ceil(timeDiff / (1000 * 60 * 60 * 24));
     if (days <= 0) days = 1;
@@ -86,8 +87,9 @@ const OptionCalculator: React.FC = () => {
               step="0.01"
               placeholder="Premium" 
               className="w-1/2 bg-transparent border-none px-3 py-2 text-sm focus:ring-0 outline-none font-bold text-indigo-600 placeholder:text-slate-300"
+              min="0"
               value={premium || ''}
-              onChange={(e) => setPremium(parseFloat(e.target.value) || 0)}
+              onChange={(e) => setPremium(Math.max(0, parseFloat(e.target.value) || 0))}
             />
             <div className="w-px h-6 bg-slate-200 self-center"></div>
             <input 
@@ -96,8 +98,9 @@ const OptionCalculator: React.FC = () => {
               placeholder="Strike" 
               disabled={tradeType === 'buy'}
               className={`w-1/2 bg-transparent border-none px-3 py-2 text-sm focus:ring-0 outline-none font-bold placeholder:text-slate-300 ${tradeType === 'buy' ? 'text-slate-300 cursor-not-allowed' : 'text-slate-700'}`}
+              min="0"
               value={strike || ''}
-              onChange={(e) => setStrike(parseFloat(e.target.value) || 0)}
+              onChange={(e) => setStrike(Math.max(0, parseFloat(e.target.value) || 0))}
             />
           </div>
         </div>

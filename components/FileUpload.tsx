@@ -93,8 +93,11 @@ const FileUpload: React.FC<FileUploadProps> = ({
 
         const normalized = results.data.map(row => {
           const r = normalizeRow(row, config);
-          // Override Account with user-supplied name
-          r.Account = accountName.trim();
+          // Preserve the CSV's own Account column when present (multi-account exports);
+          // only fall back to the user-supplied name for rows without one.
+          if (!r.Account || !String(r.Account).trim()) {
+            r.Account = accountName.trim();
+          }
           return r;
         });
 

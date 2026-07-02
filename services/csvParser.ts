@@ -93,11 +93,22 @@ export function parseSymbol(symbolString: string): ParsedSymbol | null {
   return { stockName, assetType: AssetType.STOCK, uniqueKey };
 }
 
-export function parseTrades(data: RawTrade[]): ParsedTrade[] {
+export interface SkippedRow {
+  rowIndex: number; // 1-based position in the input data
+  reason: string;
+  raw: RawTrade;
+}
+
+export function parseTrades(data: RawTrade[]): ParsedTrade[];
+export function parseTrades(data: RawTrade[], collectSkipped: true): { trades: ParsedTrade[]; skipped: SkippedRow[] };
+export function parseTrades(data: RawTrade[], collectSkipped?: boolean): ParsedTrade[] | { trades: ParsedTrade[]; skipped: SkippedRow[] } {
   const parsedTrades: ParsedTrade[] = [];
+  const skipped: SkippedRow[] = [];
   let idCounter = 0;
+  let rowIndex = 0;
 
   for (const rawTrade of data) {
+    rowIndex++;
     const actionStr = String(rawTrade.Action || '').trim();
     
     // Normalize action strings for comparison
@@ -117,13 +128,22 @@ export function parseTrades(data: RawTrade[]): ParsedTrade[] {
       if (foundAction) action = foundAction as TradeAction;
     }
 
-    if (!action) continue;
+    if (!action) {
+      skipped.push({ rowIndex, reason: `無法辨識的交易動作: "${actionStr || '(空白)'}"`, raw: rawTrade });
+      continue;
+    }
 
     const symbolDetails = parseSymbol(rawTrade.Symbol);
-    if (!symbolDetails) continue;
+    if (!symbolDetails) {
+      skipped.push({ rowIndex, reason: `無法解析的代號: "${rawTrade.Symbol || '(空白)'}"`, raw: rawTrade });
+      continue;
+    }
 
     const originalDate = robustParseDate(rawTrade.Date);
-    if (!originalDate) continue;
+    if (!originalDate) {
+      skipped.push({ rowIndex, reason: `無法解析的日期: "${rawTrade.Date || '(空白)'}"`, raw: rawTrade });
+      continue;
+    }
 
     const account = (rawTrade.Account || (rawTrade as any).account || 'Default').trim();
 
@@ -140,7 +160,7 @@ export function parseTrades(data: RawTrade[]): ParsedTrade[] {
       account,
     });
   }
-  return parsedTrades;
+  return collectSkipped ? { trades: parsedTrades, skipped } : parsedTrades;
 }
 
 export function processClosedTrades(tradesToProcess: ParsedTrade[]): { closedTrades: ClosedTrade[], openPositions: ParsedTrade[], unmatchedCloses: ParsedTrade[] } {
@@ -379,6 +399,16 @@ export function calculateSummary(closedTrades: ClosedTrade[]): SummaryData {
   const avgWin = winningTrades > 0 ? totalWinAmount / winningTrades : 0;
   const avgLoss = losingTrades > 0 ? totalLossAmount / losingTrades : 0;
 
+  // Max drawdown: largest peak-to-trough decline of cumulative P&L in close-date order
+  const byCloseDate = [...closedTrades].sort((a, b) => a.closeDate.getTime() - b.closeDate.getTime());
+  let cumulative = 0, peak = 0, maxDrawdown = 0, totalFees = 0;
+  for (const trade of byCloseDate) {
+    cumulative += trade.pnl;
+    peak = Math.max(peak, cumulative);
+    maxDrawdown = Math.max(maxDrawdown, peak - cumulative);
+    totalFees += trade.netFees;
+  }
+
   return {
     totalPnL,
     totalTrades: closedTrades.length,
@@ -392,5 +422,7 @@ export function calculateSummary(closedTrades: ClosedTrade[]): SummaryData {
     maxLoss,
     profitFactor: totalLossAmount > 0 ? totalWinAmount / totalLossAmount : (totalWinAmount > 0 ? Infinity : 0),
     profitRatio: avgLoss > 0 ? avgWin / avgLoss : (avgWin > 0 ? Infinity : 0),
+    maxDrawdown,
+    totalFees,
   };
 }

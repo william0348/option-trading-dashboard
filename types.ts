@@ -96,4 +96,6 @@ export interface SummaryData {
   maxLoss: number;
   profitFactor: number; // Sum of gains / Sum of losses
   profitRatio: number; // Average win / Average loss
+  maxDrawdown: number; // Largest peak-to-trough decline of cumulative P&L (positive number)
+  totalFees: number; // Sum of net fees across all closed trades
 }

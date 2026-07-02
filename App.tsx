@@ -10,6 +10,7 @@ import PnLByOptionTypeChart from './components/PnLByOptionTypeChart';
 import PnLByYearMonthChart from './components/PnLByYearMonthChart';
 import UnmatchedTradesTable from './components/UnmatchedTradesTable';
 import PnLCalendarChart from './components/PnLCalendarChart';
+import DTEAnalysis from './components/DTEAnalysis';
 import ErrorBoundary from './components/ErrorBoundary';
 import {
   auth, signInWithGoogle, logout, onAuthStateChanged, syncUserProfile,
@@ -60,14 +61,19 @@ function App() {
   const [summary, setSummary] = useState<SummaryData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [skipWarning, setSkipWarning] = useState<string | null>(null);
 
-  // Filter states
-  const [filterStock, setFilterStock] = useState<string>('');
-  const [filterOptionType, setFilterOptionType] = useState<OptionType | 'ALL'>('ALL');
-  const [filterAssetType, setFilterAssetType] = useState<AssetType | 'ALL'>('ALL');
-  const [filterStartDate, setFilterStartDate] = useState<string>('');
-  const [filterEndDate, setFilterEndDate] = useState<string>('');
-  const [selectedDatePreset, setSelectedDatePreset] = useState<'custom' | 'current_month' | 'last_month' | 'current_quarter' | 'last_quarter' | 'current_year' | 'last_year'>('current_year');
+  // Filter states — restored from localStorage so filters survive a reload
+  const savedFilters = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('dashboardFilters') || '{}'); } catch { return {}; }
+  }, []);
+  const [filterStock, setFilterStock] = useState<string>(savedFilters.filterStock ?? '');
+  const [filterOptionType, setFilterOptionType] = useState<OptionType | 'ALL'>(savedFilters.filterOptionType ?? 'ALL');
+  const [filterAssetType, setFilterAssetType] = useState<AssetType | 'ALL'>(savedFilters.filterAssetType ?? 'ALL');
+  const [filterStartDate, setFilterStartDate] = useState<string>(savedFilters.filterStartDate ?? '');
+  const [filterEndDate, setFilterEndDate] = useState<string>(savedFilters.filterEndDate ?? '');
+  const [selectedDatePreset, setSelectedDatePreset] = useState<'custom' | 'current_month' | 'last_month' | 'current_quarter' | 'last_quarter' | 'current_year' | 'last_year'>(savedFilters.selectedDatePreset ?? 'current_year');
+  const isFirstPresetRun = React.useRef(true);
   const [globalSearchTerm, setGlobalSearchTerm] = useState<string>('');
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
@@ -105,7 +111,7 @@ function App() {
       // Find most recent importedAt
       const dates = trades.map((t: any) => t.importedAt).filter(Boolean).sort().reverse();
       if (dates.length > 0) {
-        setLastImportDate(new Date(dates[0]).toLocaleDateString('zh-TW'));
+        setLastImportDate(new Date(dates[0]).toLocaleDateString('en-US'));
       }
     } catch (e) {
       console.error('Failed to load trades from Firestore:', e);
@@ -176,7 +182,8 @@ function App() {
         setTimeout(() => { setImportProgress(0); setImportStep(''); }, 1500);
       } catch (e) {
         console.error('Failed to save trades to Firestore:', e);
-        setError('匯入成功，但儲存到資料庫時發生錯誤。');
+        const detail = e instanceof Error ? e.message : String(e);
+        setError(`匯入成功，但儲存到資料庫時發生錯誤：${detail}`);
         setImportProgress(0);
         setImportStep('');
       }
@@ -190,10 +197,18 @@ function App() {
 
   useEffect(() => {
     if (rawCsvData) {
-      const pTrades = parseTrades(rawCsvData);
+      const { trades: pTrades, skipped } = parseTrades(rawCsvData, true);
       setParsedTrades(pTrades);
+      if (skipped.length > 0) {
+        console.warn('Skipped rows during parsing:', skipped);
+        const preview = skipped.slice(0, 3).map(s => `第 ${s.rowIndex} 行（${s.reason}）`).join('、');
+        setSkipWarning(`有 ${skipped.length} 筆資料無法解析已被略過：${preview}${skipped.length > 3 ? ' …詳見瀏覽器 Console' : ''}`);
+      } else {
+        setSkipWarning(null);
+      }
     } else {
       setParsedTrades([]);
+      setSkipWarning(null);
     }
   }, [rawCsvData]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -250,13 +265,24 @@ function App() {
     }
 
     if (selectedDatePreset === 'custom') {
-      setFilterStartDate('');
-      setFilterEndDate('');
+      // Skip clearing on mount so custom dates restored from localStorage survive
+      if (!isFirstPresetRun.current) {
+        setFilterStartDate('');
+        setFilterEndDate('');
+      }
     } else {
       setFilterStartDate(newStartDate);
       setFilterEndDate(newEndDate);
     }
+    isFirstPresetRun.current = false;
   }, [selectedDatePreset]);
+
+  // Persist filters so they survive a page reload
+  useEffect(() => {
+    localStorage.setItem('dashboardFilters', JSON.stringify({
+      filterStock, filterOptionType, filterAssetType, filterStartDate, filterEndDate, selectedDatePreset,
+    }));
+  }, [filterStock, filterOptionType, filterAssetType, filterStartDate, filterEndDate, selectedDatePreset]);
 
 
   const filteredTrades = useMemo(() => {
@@ -309,29 +335,24 @@ function App() {
       );
     }
 
-    // Apply Date Range Filter (based on closeDate)
-    const startDateObj = filterStartDate ? new Date(filterStartDate) : null;
-    const endDateObj = filterEndDate ? new Date(filterEndDate) : null;
+    // Apply Date Range Filter (based on closeDate).
+    // closeDate is normalized to UTC midnight and new Date('YYYY-MM-DD') also parses
+    // as UTC midnight, so compare timestamps directly — no local-time rounding.
+    const startTime = filterStartDate ? new Date(filterStartDate).getTime() : null;
+    const endTime = filterEndDate ? new Date(filterEndDate).getTime() : null;
 
-    if (startDateObj || endDateObj) {
+    if (startTime !== null || endTime !== null) {
       currentTrades = currentTrades.filter(trade => {
-        const tradeCloseDate = new Date(trade.closeDate); // Ensure it's a Date object
-
-        // To handle timezone correctly, compare dates without time part by resetting to midnight.
-        tradeCloseDate.setHours(0, 0, 0, 0);
-
-        const matchesStartDate = !startDateObj || tradeCloseDate >= startDateObj;
-        const matchesEndDate = !endDateObj || tradeCloseDate <= endDateObj;
-        
-        return matchesStartDate && matchesEndDate;
+        const t = trade.closeDate.getTime();
+        return (startTime === null || t >= startTime) && (endTime === null || t <= endTime);
       });
     }
 
-    // Apply Day filter (from calendar click)
+    // Apply Day filter (from calendar click) — UTC accessors to match calendar keys
     if (selectedDay) {
       currentTrades = currentTrades.filter(trade => {
         const d = trade.closeDate;
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
         return key === selectedDay;
       });
     }
@@ -365,7 +386,7 @@ function App() {
   const formatNumberForCsv = (amount: number) => amount.toFixed(2);
 
   // Helper for formatting dates for CSV export
-  const formatDateForCsv = (date: Date) => date.toLocaleDateString('en-US');
+  const formatDateForCsv = (date: Date) => date.toLocaleDateString('en-US', { timeZone: 'UTC' });
 
   // Helper for formatting option type for CSV export
   const formatOptionTypeForCsv = (type: OptionType) => (type === OptionType.CALL ? 'Call' : 'Put');
@@ -464,10 +485,10 @@ function App() {
             </div>
             <div className="hidden sm:block">
               <h1 className="text-sm font-black text-slate-900 tracking-tight leading-none">Option Trading</h1>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Dashboard</p>
+              <p className="text-[12px] text-slate-400 font-bold uppercase tracking-widest">Dashboard</p>
             </div>
             {firestoreLoading && (
-              <span className="flex items-center gap-1.5 text-[10px] text-slate-400 font-bold uppercase tracking-widest ml-2">
+              <span className="flex items-center gap-1.5 text-[12px] text-slate-400 font-bold uppercase tracking-widest ml-2">
                 <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
                 Syncing
               </span>
@@ -478,14 +499,14 @@ function App() {
               <>
                 {user.photoURL && <img src={user.photoURL} alt="avatar" className="w-7 h-7 rounded-full border-2 border-slate-100"/>}
                 <span className="text-xs font-bold text-slate-600 hidden md:block">{user.displayName || user.email}</span>
-                <button onClick={() => logout()} className="text-[10px] font-black uppercase tracking-widest px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition-colors">
-                  登出
+                <button onClick={() => logout()} className="text-[12px] font-black uppercase tracking-widest px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition-colors">
+                  Sign Out
                 </button>
               </>
             ) : (
-              <button onClick={() => signInWithGoogle()} className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-colors">
+              <button onClick={() => signInWithGoogle()} className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[12px] font-black uppercase tracking-widest transition-colors">
                 <svg className="w-3.5 h-3.5" viewBox="0 0 24 24"><path fill="#fff" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#fff" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#fff" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#fff" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-                Google 登入
+                Sign In
               </button>
             )}
           </div>
@@ -508,6 +529,16 @@ function App() {
           setImportStep={setImportStep}
         />
 
+        {skipWarning && (
+          <div className="bg-amber-50 border border-amber-200 text-amber-700 px-4 py-3 rounded-2xl text-sm font-medium flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              {skipWarning}
+            </div>
+            <button onClick={() => setSkipWarning(null)} aria-label="關閉警告" className="text-amber-400 hover:text-amber-600 font-black px-2">✕</button>
+          </div>
+        )}
+
         {error && (
           <div className="bg-rose-50 border border-rose-200 text-rose-700 px-4 py-3 rounded-2xl text-sm font-medium flex items-center gap-2">
             <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -521,18 +552,18 @@ function App() {
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z"/></svg>
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Filters</span>
+                <span className="text-[13px] font-black text-slate-500 uppercase tracking-widest">Filters</span>
                 {(filterStock || filterAssetType !== 'ALL' || filterOptionType !== 'ALL' || filterStartDate || filterEndDate || selectedAccount !== 'ALL') && (
-                  <span className="px-2 py-0.5 bg-indigo-100 text-indigo-600 rounded-full text-[9px] font-black uppercase tracking-widest">Active</span>
+                  <span className="px-2 py-0.5 bg-indigo-100 text-indigo-600 rounded-full text-[11px] font-black uppercase tracking-widest">Active</span>
                 )}
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={handleExportCsv} disabled={filteredTrades.length === 0}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-100 disabled:text-slate-300 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors">
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-100 disabled:text-slate-300 text-white rounded-xl text-[12px] font-black uppercase tracking-widest transition-colors">
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                   Export CSV
                 </button>
-                <button onClick={clearFilters} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors">
+                <button onClick={clearFilters} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-[12px] font-black uppercase tracking-widest transition-colors">
                   Reset
                 </button>
               </div>
@@ -542,8 +573,9 @@ function App() {
             <div className="relative mb-4">
               <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
               <input type="text" value={globalSearchTerm} onChange={(e) => setGlobalSearchTerm(e.target.value)}
+                aria-label="Search trades"
                 placeholder="Search trades — ticker, type, price, date..."
-                className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-100 rounded-xl text-[11px] font-bold text-slate-700 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 transition-all"
+                className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-100 rounded-xl text-[13px] font-bold text-slate-700 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 transition-all"
               />
             </div>
 
@@ -551,53 +583,53 @@ function App() {
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
               {existingAccounts.length > 0 && (
                 <div className="lg:col-span-1">
-                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">帳戶</label>
+                  <label className="text-[12px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Account</label>
                   <select value={selectedAccount} onChange={(e) => setSelectedAccount(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[11px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400">
-                    <option value="ALL">全部帳戶</option>
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[13px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400">
+                    <option value="ALL">All Accounts</option>
                     {existingAccounts.map(acc => <option key={acc} value={acc}>{acc}</option>)}
                   </select>
                 </div>
               )}
               <div>
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">
-                  初始資金 {currentBaseFund > 0 && <span className="text-indigo-500 normal-case">{formatCurrency(currentBaseFund)}</span>}
+                <label className="text-[12px] font-black text-slate-400 uppercase tracking-widest mb-1 block">
+                  Base Fund {currentBaseFund > 0 && <span className="text-indigo-500 normal-case">{formatCurrency(currentBaseFund)}</span>}
                 </label>
                 <div className="flex gap-1">
                   <input type="number" min="0" placeholder="e.g. 100000" value={fundInputValue}
                     onChange={(e) => setFundInputValue(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleFundSave()}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[11px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"/>
-                  <button onClick={handleFundSave} className="px-2.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black transition-colors">✓</button>
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[13px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"/>
+                  <button onClick={handleFundSave} className="px-2.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[12px] font-black transition-colors">✓</button>
                 </div>
               </div>
               <div>
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Symbol</label>
+                <label className="text-[12px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Symbol</label>
                 <input type="text" placeholder="TSLA, NVDA..." value={filterStock} onChange={(e) => setFilterStock(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[11px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"/>
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[13px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"/>
               </div>
               <div>
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">交易類型</label>
+                <label className="text-[12px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Asset Type</label>
                 <select value={filterAssetType} onChange={(e) => setFilterAssetType(e.target.value as AssetType | 'ALL')}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[11px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400">
-                  <option value="ALL">全部</option>
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[13px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400">
+                  <option value="ALL">All</option>
                   <option value={AssetType.OPTION}>Option</option>
-                  <option value={AssetType.STOCK}>個股</option>
+                  <option value={AssetType.STOCK}>Stock</option>
                 </select>
               </div>
               <div>
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Option Type</label>
+                <label className="text-[12px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Option Type</label>
                 <select value={filterOptionType} onChange={(e) => setFilterOptionType(e.target.value as OptionType | 'ALL')}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[11px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400">
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[13px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400">
                   <option value="ALL">All</option>
                   <option value={OptionType.CALL}>Call</option>
                   <option value={OptionType.PUT}>Put</option>
                 </select>
               </div>
               <div>
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Period</label>
+                <label className="text-[12px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Period</label>
                 <select value={selectedDatePreset} onChange={(e) => setSelectedDatePreset(e.target.value as typeof selectedDatePreset)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[11px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400">
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[13px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400">
                   <option value="custom">All Time</option>
                   <option value="current_month">This Month</option>
                   <option value="last_month">Last Month</option>
@@ -610,14 +642,14 @@ function App() {
               {selectedDatePreset === 'custom' && (
                 <>
                   <div>
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">From</label>
+                    <label className="text-[12px] font-black text-slate-400 uppercase tracking-widest mb-1 block">From</label>
                     <input type="date" value={filterStartDate} onChange={(e) => { setFilterStartDate(e.target.value); setSelectedDatePreset('custom'); }}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[11px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"/>
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[13px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"/>
                   </div>
                   <div>
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 block">To</label>
+                    <label className="text-[12px] font-black text-slate-400 uppercase tracking-widest mb-1 block">To</label>
                     <input type="date" value={filterEndDate} onChange={(e) => { setFilterEndDate(e.target.value); setSelectedDatePreset('custom'); }}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[11px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"/>
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[13px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"/>
                   </div>
                 </>
               )}
@@ -651,22 +683,34 @@ function App() {
                 valueColorClass="text-emerald-600" icon={iconMax} description="Best single trade"/>
               <SummaryCard title="Max Loss" value={formatCurrency(filteredSummary.maxLoss)}
                 valueColorClass="text-rose-600" icon={iconMin} description="Worst single trade"/>
+              <SummaryCard title="Profit Factor"
+                value={isFinite(filteredSummary.profitFactor) ? filteredSummary.profitFactor.toFixed(2) : '∞'}
+                valueColorClass={filteredSummary.profitFactor >= 1 ? 'text-emerald-600' : 'text-rose-600'} icon={iconTrades}
+                description="Gross wins ÷ gross losses"/>
+              <SummaryCard title="Max Drawdown" value={formatCurrency(-filteredSummary.maxDrawdown)}
+                valueColorClass="text-rose-600" icon={iconMin}
+                description="Peak-to-trough decline"/>
+              <SummaryCard title="Total Fees" value={formatCurrency(filteredSummary.totalFees)}
+                valueColorClass="text-slate-700" icon={iconAvg}
+                description={filteredSummary.totalPnL !== 0
+                  ? `${Math.abs((filteredSummary.totalFees / Math.abs(filteredSummary.totalPnL)) * 100).toFixed(1)}% of net P&L`
+                  : 'Commission drag'}/>
             </div>
 
             {/* Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
                 <div className="flex items-center justify-between mb-1">
-                  <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Cumulative P&L</h3>
-                  <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">Over Time</span>
+                  <h3 className="text-[13px] font-black text-slate-500 uppercase tracking-widest">Cumulative P&L</h3>
+                  <span className="text-[11px] font-black text-slate-300 uppercase tracking-widest">Over Time</span>
                 </div>
                 <p className={`text-xl font-black mb-4 ${getPnLColorClass(filteredSummary.totalPnL)}`}>{formatCurrency(filteredSummary.totalPnL)}</p>
                 <PnLOverTimeChart trades={filteredTrades} baseFund={currentBaseFund || undefined}/>
               </div>
               <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
                 <div className="flex items-center justify-between mb-1">
-                  <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Monthly P&L</h3>
-                  <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">Click to Filter</span>
+                  <h3 className="text-[13px] font-black text-slate-500 uppercase tracking-widest">Monthly P&L</h3>
+                  <span className="text-[11px] font-black text-slate-300 uppercase tracking-widest">Click to Filter</span>
                 </div>
                 <p className="text-xl font-black mb-4 text-slate-300">
                   {selectedMonth ? <span className="text-indigo-500">{selectedMonth}</span> : 'All Months'}
@@ -675,21 +719,24 @@ function App() {
               </div>
               <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
                 <div className="flex items-center justify-between mb-1">
-                  <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">P&L by Symbol</h3>
-                  <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">Top 15</span>
+                  <h3 className="text-[13px] font-black text-slate-500 uppercase tracking-widest">P&L by Symbol</h3>
+                  <span className="text-[11px] font-black text-slate-300 uppercase tracking-widest">Top 10 / Bottom 5</span>
                 </div>
                 <p className="text-xl font-black mb-4 text-slate-700">{[...new Set(filteredTrades.map(t => t.stockName))].length} Symbols</p>
                 <PnLBySymbolChart trades={filteredTrades}/>
               </div>
               <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
                 <div className="flex items-center justify-between mb-1">
-                  <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Strategy Breakdown</h3>
-                  <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">By Type</span>
+                  <h3 className="text-[13px] font-black text-slate-500 uppercase tracking-widest">Strategy Breakdown</h3>
+                  <span className="text-[11px] font-black text-slate-300 uppercase tracking-widest">By Type</span>
                 </div>
                 <p className="text-xl font-black mb-1 text-slate-700">{filteredSummary.totalTrades} Trades</p>
                 <PnLByOptionTypeChart trades={filteredTrades}/>
               </div>
             </div>
+
+            {/* DTE Analysis */}
+            <DTEAnalysis trades={filteredTrades}/>
 
             {/* P&L Calendar */}
             <PnLCalendarChart
@@ -704,7 +751,7 @@ function App() {
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
               <div className="px-6 py-4 border-b border-slate-50 flex items-center justify-between">
                 <div>
-                  <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Trade History</h3>
+                  <h3 className="text-[13px] font-black text-slate-500 uppercase tracking-widest">Trade History</h3>
                   <p className="text-sm font-black text-slate-900 mt-0.5">
                     {selectedDay
                       ? <><span className="text-indigo-500">{selectedDay}</span> — {filteredTrades.length} trades</>
@@ -713,7 +760,7 @@ function App() {
                 </div>
                 {selectedDay && (
                   <button onClick={() => setSelectedDay(null)}
-                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-[9px] font-black uppercase tracking-widest transition-colors">
+                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-[12px] font-black uppercase tracking-widest transition-colors">
                     Clear Day
                   </button>
                 )}
@@ -728,8 +775,8 @@ function App() {
           <div className="bg-white rounded-2xl border border-amber-100 shadow-sm overflow-hidden">
             <div className="px-6 py-4 border-b border-amber-50 flex items-center gap-2">
               <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-              <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Unmatched & Open Positions</h3>
-              <span className="px-2 py-0.5 bg-amber-100 text-amber-600 rounded-full text-[9px] font-black">{unmatchedTrades.length}</span>
+              <h3 className="text-[13px] font-black text-slate-500 uppercase tracking-widest">Unmatched & Open Positions</h3>
+              <span className="px-2 py-0.5 bg-amber-100 text-amber-600 rounded-full text-[11px] font-black">{unmatchedTrades.length}</span>
             </div>
             <UnmatchedTradesTable trades={unmatchedTrades}/>
           </div>
